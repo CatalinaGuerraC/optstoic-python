@@ -13,10 +13,11 @@ SCIP_CMD_PARAMETERS = [
 
 GUROBI_CMD_OPTIONS = [
     ('Threads', 2),
-    ('TimeLimit', 1800),
-    ('MIPGapAbs', 1e-6),
-    ('MIPGap', 1e-6),
-    ('CliqueCuts', 2)]
+    ('TimeLimit', 3600),
+    ('MIPGapAbs', 1e-3),
+    ('MIPGap', 1e-3),
+    ('CliqueCuts', 2),
+    ('NumericFocus', 3)]
 
 CPLEX_CMD_OPTIONS = [
     'mip tolerances mipgap 1e-6',
@@ -35,7 +36,7 @@ SOLVER_KWARGS = {
         mip=True,
         msg=True,
         timeLimit=1800,
-        MIPGapAbs=1e-6),
+        MIPGapAbs=1e-3),
     'GUROBI_CMD': dict(
         solver='GUROBI_CMD',
         path=None,

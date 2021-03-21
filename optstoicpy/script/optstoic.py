@@ -28,6 +28,8 @@ import random
 import string  # to generate random hex code
 import json
 import pulp
+import pandas as pd
+import numpy as np
 # import cPickle as pickle
 #import pdb
 from optstoicpy.core.database import load_db_v3
@@ -133,7 +135,7 @@ class OptStoic(object):
                 string.digits) for _ in range(N))
 
     def change_objective(self, new_objective):
-        if new_objective not in ['MinFlux', 'MinRxn']:
+        if new_objective not in ['MinFlux', 'MinRxn','EnzymeLoad']:
             raise ValueError("The objective for OptStoic is "
                              "not correctly defined. "
                              "Please use either 'MinFlux' or 'MinRxn'.")
@@ -169,17 +171,36 @@ class OptStoic(object):
         M = self.M
 
         # Initialize variables
-        v = pulp.LpVariable.dicts("v", self.database.reactions,
+        if self.objective == 'MinFlux':
+            v = pulp.LpVariable.dicts("v", self.database.reactions,
+                                      lowBound=-M, upBound=M, cat=self._varCat)
+            vf = pulp.LpVariable.dicts("vf", self.database.reactions,
+                                       lowBound=0, upBound=M, cat=self._varCat)
+            vb = pulp.LpVariable.dicts("vb", self.database.reactions,
+                                       lowBound=0, upBound=M, cat=self._varCat)
+            yf = pulp.LpVariable.dicts("yf", self.database.reactions,
+                                       lowBound=0, upBound=1, cat='Binary')
+            yb = pulp.LpVariable.dicts("yb", self.database.reactions,
+                                       lowBound=0, upBound=1, cat='Binary')
+        
+        if self.objective == 'EnzymeLoad':
+            Ef = pulp.LpVariable.dicts("Ef", self.database.reactions,
+                                      lowBound=0, upBound=1e+10, cat=self._varCat)
+            Eb = pulp.LpVariable.dicts("Eb", self.database.reactions,
+                                      lowBound=0, upBound=1e+10, cat=self._varCat)
+            E = pulp.LpVariable.dicts("E", self.database.reactions,
+                                      lowBound=-1e-10, upBound=1e10, cat=self._varCat)
+            v = pulp.LpVariable.dicts("v", self.database.reactions,
                                   lowBound=-M, upBound=M, cat=self._varCat)
-        vf = pulp.LpVariable.dicts("vf", self.database.reactions,
-                                   lowBound=0, upBound=M, cat=self._varCat)
-        vb = pulp.LpVariable.dicts("vb", self.database.reactions,
-                                   lowBound=0, upBound=M, cat=self._varCat)
-        yf = pulp.LpVariable.dicts("yf", self.database.reactions,
+            vf = pulp.LpVariable.dicts("vf", self.database.reactions,
+                                       lowBound=0, upBound=M, cat=self._varCat)
+            vb = pulp.LpVariable.dicts("vb", self.database.reactions,
+                                       lowBound=0, upBound=M, cat=self._varCat)
+            yf = pulp.LpVariable.dicts("yf", self.database.reactions,
                                    lowBound=0, upBound=1, cat='Binary')
-        yb = pulp.LpVariable.dicts("yb", self.database.reactions,
+            yb = pulp.LpVariable.dicts("yb", self.database.reactions,
                                    lowBound=0, upBound=1, cat='Binary')
-
+        
         if self.add_loopless_constraints:
             a = pulp.LpVariable.dicts("a", self.database.reactions,
                                       lowBound=0, upBound=1, cat='Binary')
@@ -192,8 +213,8 @@ class OptStoic(object):
         # Update lower and upper bound based on reaction directionality
 
         for j in self.database.reactions:
-
-            if j in self.database.all_excluded_reactions:
+             
+            if j in self.database.excluded_reactions:
                 v[j].lowBound = 0
                 v[j].upBound = 0
                 vf[j].lowBound = 0
@@ -203,7 +224,7 @@ class OptStoic(object):
                 yb[j].lowBound = 0
                 yb[j].upBound = 0
 
-                continue
+                #continue
 
             if self.database.rxntype[j] == 0:
                 # Forward irreversible
@@ -230,6 +251,8 @@ class OptStoic(object):
 
         # Fix stoichiometry of source/sink metabolites
         for rxn, bounds in self.specific_bounds.items():
+            # print(v[rxn])
+            # print(bounds['LB'])
             v[rxn].lowBound = bounds['LB']
             v[rxn].upBound = bounds['UB']
 
@@ -259,7 +282,18 @@ class OptStoic(object):
             if self.zlb is not None:
                 # fix lower bound
                 lp_prob += condition == self.zlb, 'zLowerBound'
-
+        
+        # Enzyme-Load objective
+        elif self.objective == "EnzymeLoad":
+            condition = pulp.lpSum([Ef[j] + Eb[j] 
+                                  for j in self.database.reactions
+                                  if self.database.rxntype[j] !=4])
+            lp_prob += condition, "EnzymeLoad"
+            
+            if self.zlb is not None:
+                # fix lower bound
+                lp_prob += condition == self.zlb, 'zLowerBound'
+        
         # Constraints
         # Mass_balance
         for i in self.database.metabolites:
@@ -291,6 +325,39 @@ class OptStoic(object):
                 # Ensure that either yf or yb can be 1, not both
                 lp_prob += yf[j] + yb[j] <= 1, 'cons5_%s' % j
 
+        if  self.objective == "EnzymeLoad":  
+            sa_db = pd.read_excel('./enzyme_load_info.xlsx',
+                                        index_col= 'KEGG ID')
+            # replace empty strings with np.NaN
+            sa_db = sa_db.replace(r'^\s*$', np.NaN, regex=True)
+            # replace np.NaN with zeros
+            sa_db = sa_db.fillna(0)
+            #divide sa_minus and sa_plus valid coefficients
+            sa_plus_db = sa_db.query('(sa_plus<=1e9) and (sa_plus>=1e-9)')
+            sa_minus_db = sa_db.query('(sa_minus<=1e9) and (sa_minus>=1e-9)')
+            
+            for j in self.database.reactions:
+                lp_prob += (v[j] == vf[j] - vb[j]), "flux_%s" % j
+                lp_prob += (E[j] == Ef[j] - Eb[j]), "enzyme-load_%s" % j
+                # Ensure that either yf or yb can be 1, not both
+                lp_prob += yf[j] + yb[j] <= 1, 'direction_%s' % j
+                # Cases: constraint with and without specific activity 
+                # values (sa_plus or sa_minus)
+                if (j in sa_plus_db.index) and (sa_plus_db.at[j,'sa_plus'] != 0):
+                    lp_prob += vf[j] <= Ef[j]*60*sa_plus_db.at[j,'sa_plus'], "sa_plus_cons_%s" % j
+                    if (j in sa_plus_db.index) and (sa_plus_db.at[j,'sa_plus'] != 0):
+                        lp_prob += vb[j] <= Eb[j]*60*sa_plus_db.at[j,'sa_plus'], "sa_minus_cons_%s" % j
+                    else:
+                        lp_prob += vb[j] >= yb[j] * 0.5, "cons3_%s" % j
+                        lp_prob += vb[j] <= yb[j] * M, "cons4_%s" % j
+                else:
+                    # These constraints ensure that when yf=0 and yb=0 ,
+                    # no flux goes through the reaction
+                    lp_prob += vf[j] >= yf[j] * 0.5, "cons1_%s" % j
+                    lp_prob += vf[j] <= yf[j] * M, "cons2_%s" % j
+                    lp_prob += vb[j] >= yb[j] * 0.5, "cons3_%s" % j
+                    lp_prob += vb[j] <= yb[j] * M, "cons4_%s" % j
+                
         if self.add_loopless_constraints:
             self.logger.info("Loopless constraints are turned on.")
 
@@ -321,8 +388,13 @@ class OptStoic(object):
                 lp_prob += pulp.lpSum(v[rxn] for rxn in group['reactions']
                                       ) >= group['LB'], "%s_LB" % group['constraint_name']
 
-        return lp_prob, v, vf, vb, yf, yb, a, G
-
+        if self.objective == 'EnzymeLoad':
+            
+            return lp_prob, v, vf, vb, yf, yb, a, G, E, Ef, Eb
+        else: 
+            return lp_prob, v, vf, vb, yf, yb, a, G
+        
+        
     def solve(
             self,
             exclude_existing_solution=False,
@@ -345,7 +417,7 @@ class OptStoic(object):
         Raises:
             ValueError: Description
         """
-        if self.objective not in ['MinFlux', 'MinRxn']:
+        if self.objective not in ['MinFlux', 'MinRxn','EnzymeLoad']:
             raise ValueError(
                 "The objective for OptStoic is not correctly defined. Please use either 'MinFlux' or 'MinRxn'.")
 
@@ -355,7 +427,13 @@ class OptStoic(object):
         self.logger.info(
             "Finding multiple pathways using Optstoic %s...",
             self.objective)
-        lp_prob, v, vf, vb, yf, yb, a, G = self.create_minflux_problem()
+        
+        if self.objective == 'EnzymeLoad':
+             
+            lp_prob, v, vf, vb, yf, yb, a, G, E, Ef, Eb = self.create_minflux_problem()
+        else: 
+            lp_prob, v, vf, vb, yf, yb, a, G = self.create_minflux_problem()
+        
 
         # Create integer cut for existing pathways
         if exclude_existing_solution and bool(self.pathways):
@@ -376,10 +454,10 @@ class OptStoic(object):
         #     result_output = open(os.path.join(self.result_filepath, outputfile), "w+")
         # else:
         #     result_output = open(os.path.join(self.result_filepath, outputfile), "a+")
-
+        
         while True and self.iteration <= max_iteration:
             self.logger.info("Iteration %s", self.iteration)
-            # lp_prob.writeLP("OptStoic.lp", mip=1)  # optional
+            # lp_prob.wr("OptStoic.lp", mip=1)  # optional
             e1 = time.time()
             lp_prob.solve(solver=self.pulp_solver)
             e2 = time.time()
@@ -440,7 +518,8 @@ class OptStoic(object):
         self.lp_prob = lp_prob
 
         return self.lp_prob, self.pathways
-
+    
+    
     def write_pathways_to_json(self, json_filename="temp_pathways.json"):
 
         temp = {}
@@ -486,7 +565,7 @@ class OptStoic(object):
                         exclude_existing_solution=False,
                         outputfile="OptStoic_pulp_result_gcl.txt",
                         max_iteration=None,
-                        cleanup=True,
+                        cleanup=False,
                         gurobi_options=GUROBI_OPTIONS):
         """
         Solve OptStoic problem using Gurobi command line (gurobi_cl)
@@ -510,10 +589,10 @@ class OptStoic(object):
         Raises:
             ValueError: Description
         """
-        if self.objective not in ['MinFlux', 'MinRxn']:
+        if self.objective not in ['MinFlux', 'MinRxn', 'EnzymeLoad']:
             raise ValueError("The objective for OptStoic is not correctly "
-                             "defined. Please use either 'MinFlux' or "
-                             "'MinRxn'.")
+                             "defined. Please use either 'MinFlux', "
+                             " 'EnzymeLoad' or 'MinRxn'.")
 
         if max_iteration is None:
             max_iteration = self.max_iteration
@@ -522,8 +601,12 @@ class OptStoic(object):
 
         self.logger.info("Finding multiple pathways using"
                          " Optstoic %s and Gurobi CL...", self.objective)
-        lp_prob, v, vf, vb, yf, yb, a, G = self.create_minflux_problem()
-
+       
+        if self.objective == 'EnzymeLoad':
+            lp_prob, v, vf, vb, yf, yb, a, G, E, Ef, Eb = self.create_minflux_problem()
+        else:
+            lp_prob, v, vf, vb, yf, yb, a, G = self.create_minflux_problem()     
+        
         # Create integer cut for existing pathways
         if exclude_existing_solution and bool(self.pathways):
             self.iteration = max(self.pathways.keys()) + 1
@@ -547,7 +630,9 @@ class OptStoic(object):
         # else:
         #     result_output = open(os.path.join(
         #         self.result_filepath, outputfile), "a+")
-
+        
+        lp_prob.writeLP("test" + ".lp", mip=1)
+        
         while True and self.iteration <= max_iteration:
             self.logger.info("Iteration %s", self.iteration)
             lp_prob.writeLP(self.lp_prob_fname + ".lp", mip=1)
@@ -594,12 +679,13 @@ class OptStoic(object):
                     name='Pathway_{:03d}'.format(self.iteration),
                     reaction_ids=res['reaction_id'],
                     fluxes=res['flux'],
-                    sourceSubstrateID='C00031',
-                    endSubstrateID='C00022',
+                    sourceSubstrateID='C00022',
+                    endSubstrateID='C00024',
                     note=res
                 )
                 # Keep a copy of pathways in case program terminate midway
-                self.write_pathways_to_json(json_filename="temp_pathways.json")
+                self.write_pathways_to_json(json_filename=outputfile)
+                                            #"temp_pathways.json")
 
                 # Integer cut constraint is added so that
                 # the same solution cannot be returned again

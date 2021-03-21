@@ -12,7 +12,7 @@ from subprocess import Popen, PIPE
 
 def solve_with_gurobi_cl_debug(
         lp_filename,
-        options='Threads=2 TimeLimit=1200 MIPGapAbs=1e-6'):
+        options='Threads=2 TimeLimit=1200 MIPGapAbs=1e-6 NumericFocus=3'):
     args = 'gurobi_cl ' + options + \
         ' ResultFile=%s.sol %s.lp' % (lp_filename, lp_filename)
     command = args.split()
@@ -39,7 +39,7 @@ def solve_with_gurobi_cl_debug(
 
 def solve_with_gurobi_cl(
         lp_filename,
-        options='Threads=2 TimeLimit=1200 MIPGapAbs=1e-6',
+        options='Threads=1 TimeLimit=1200 MIPGapAbs=1e-3',
         verbose=True):
     args = 'gurobi_cl ' + options + \
         ' ResultFile=%s.sol %s.lp' % (lp_filename, lp_filename)
