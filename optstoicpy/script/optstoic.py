@@ -344,6 +344,7 @@ class OptStoic(object):
                 # Cases: constraint with and without specific activity 
                 # values (sa_plus or sa_minus)
                 if (j in sa_plus_db.index) and (sa_plus_db.at[j,'sa_plus'] != 0):
+                    # print(j)
                     lp_prob += vf[j] <= Ef[j]*60*sa_plus_db.at[j,'sa_plus'], "sa_plus_cons_%s" % j
                     if (j in sa_plus_db.index) and (sa_plus_db.at[j,'sa_plus'] != 0):
                         lp_prob += vb[j] <= Eb[j]*60*sa_plus_db.at[j,'sa_plus'], "sa_minus_cons_%s" % j
@@ -397,7 +398,7 @@ class OptStoic(object):
         
     def solve(
             self,
-            exclude_existing_solution=False,
+            exclude_existing_solution=True,
             outputfile="OptStoic_pulp_result.txt",
             max_iteration=None):
         """
@@ -464,7 +465,7 @@ class OptStoic(object):
             self.logger.info(
                 "This iteration solved in %.3f seconds.",
                 (e2 - e1))
-
+            
             # The solution is printed if it was deemed "optimal
             if pulp.LpStatus[lp_prob.status] == "Optimal":
                 self.logger.info("Writing result to output file...")
@@ -476,12 +477,19 @@ class OptStoic(object):
                 res['iteration'] = self.iteration
                 res['time'] = (e2 - e1)
                 res['modelstat'] = "Optimal"
-
+                res['EnzymeLoad'] = []
+                
+                #enzyme_loads dictas an output
+                enzyme_loads = {}
+                
                 for j in self.database.reactions:
                     if v[j].varValue is not None:
                         if v[j].varValue > EPS or v[j].varValue < -EPS:
                             res['reaction_id'].append(j)
                             res['flux'].append(v[j].varValue)
+                        if self.objective == 'EnzymeLoad':
+                            enzyme_loads['E_' + j] = E[j].varValue
+         
                 #             result_output.write("%s %.8f\n" %(v[j].name, v[j].varValue))
 
                 # result_output.write("%s = %.8f\n" % (self.objective, pulp.value(lp_prob.objective)))
@@ -516,8 +524,14 @@ class OptStoic(object):
         # result_output.close()
 
         self.lp_prob = lp_prob
-
-        return self.lp_prob, self.pathways
+        
+        if self.objective == 'EnzymeLoad': 
+            return self.lp_prob, self.pathways, enzyme_loads
+        else: 
+            return self.lp_prob, self.pathways
+        
+        
+        
     
     
     def write_pathways_to_json(self, json_filename="temp_pathways.json"):
@@ -562,7 +576,7 @@ class OptStoic(object):
         self.pathways = {}
 
     def solve_gurobi_cl(self,
-                        exclude_existing_solution=False,
+                        exclude_existing_solution=True,
                         outputfile="OptStoic_pulp_result_gcl.txt",
                         max_iteration=None,
                         cleanup=False,
@@ -643,7 +657,7 @@ class OptStoic(object):
             self.logger.info(
                 "This iteration solved in %.3f seconds.",
                 (e2 - e1))
-
+            
             # The solution is printed if it was deemed "optimal
             if lp_status in ["Optimal", "Time_limit"]:
                 objective_function, varValue = parse_gurobi_sol(
@@ -656,10 +670,11 @@ class OptStoic(object):
                 res['time'] = (e2 - e1)
                 res['modelstat'] = lp_status
                 res['solvestat'] = solver_message
-
+                
                 # result_output.write("\nIteration no.: %d\n" %self.iteration)
                 # result_output.write("\nModelstat: %s\n" %lp_status)
-
+                
+                
                 for j in self.database.reactions:
                     if 'v_' + j in varValue:
                         v = varValue['v_' + j]
