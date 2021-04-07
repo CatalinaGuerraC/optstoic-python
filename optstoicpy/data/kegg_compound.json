@@ -17598,5 +17598,12 @@
     "C21127": "Holyrine A", 
     "C21128": "O-Demethyl-N-demethyl-staurosporine", 
     "C21129": "(S)-2-Methylbutanoyl-[acp]", 
-    "C21130": "Lovastatin acid"
+    "C21130": "Lovastatin acid",
+    "A": "A",
+    "B": "B",
+    "C": "C",
+    "D": "D",
+    "E": "E",
+    "F": "F",
+    "G": "G"
 }

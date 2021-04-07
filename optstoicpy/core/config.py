@@ -19,8 +19,8 @@ cofactors = set(cofactorsList)
 #    ,'r+'))
 rxnSji = json.load(open(os.path.join(data_dir,
                                      'optstoic_db_v3',
-                                     #'optstoic_v3_Sji_dict.json'), 'r+'))
-                                     'toy_model_Sji.json'), 'r+'))
+                                     'optstoic_v3_Sji_dict.json'), 'r+'))
+                                     #'toy_model_Sji.json'), 'r+'))
 
 kegg_compound = json.load(open(os.path.join(data_dir,
                                             'kegg_compound.json'), 'r+'))

@@ -185,11 +185,11 @@ class OptStoic(object):
         
         if self.objective == 'EnzymeLoad':
             Ef = pulp.LpVariable.dicts("Ef", self.database.reactions,
-                                      lowBound=0, upBound=1e+10, cat=self._varCat)
+                                      lowBound=0, upBound=1e+10, cat='Continuous')
             Eb = pulp.LpVariable.dicts("Eb", self.database.reactions,
-                                      lowBound=0, upBound=1e+10, cat=self._varCat)
+                                      lowBound=0, upBound=1e+10, cat='Continuous')
             E = pulp.LpVariable.dicts("E", self.database.reactions,
-                                      lowBound=-1e-10, upBound=1e10, cat=self._varCat)
+                                      lowBound=0, upBound=1e10, cat='Continuous')
             v = pulp.LpVariable.dicts("v", self.database.reactions,
                                   lowBound=-M, upBound=M, cat=self._varCat)
             vf = pulp.LpVariable.dicts("vf", self.database.reactions,
@@ -252,7 +252,6 @@ class OptStoic(object):
         # Fix stoichiometry of source/sink metabolites
         for rxn, bounds in self.specific_bounds.items():
             # print(v[rxn])
-            # print(bounds['LB'])
             v[rxn].lowBound = bounds['LB']
             v[rxn].upBound = bounds['UB']
 
@@ -344,20 +343,21 @@ class OptStoic(object):
                 # Cases: constraint with and without specific activity 
                 # values (sa_plus or sa_minus)
                 if (j in sa_plus_db.index) and (sa_plus_db.at[j,'sa_plus'] != 0):
-                    # print(j)
                     lp_prob += vf[j] <= Ef[j]*60*sa_plus_db.at[j,'sa_plus'], "sa_plus_cons_%s" % j
+                    #lp_prob += Ef[j] <= yf[j] * M#Ef[j].upBound
                     if (j in sa_plus_db.index) and (sa_plus_db.at[j,'sa_plus'] != 0):
                         lp_prob += vb[j] <= Eb[j]*60*sa_plus_db.at[j,'sa_plus'], "sa_minus_cons_%s" % j
-                    else:
-                        lp_prob += vb[j] >= yb[j] * 0.5, "cons3_%s" % j
-                        lp_prob += vb[j] <= yb[j] * M, "cons4_%s" % j
-                else:
+                        #lp_prob += Ef[j] <= yf[j] * M #Ef[j].upBound
+                  #  else:
+                  #      lp_prob += vb[j] >= yb[j] * 0.5, "cons3_%s" % j
+                  #      lp_prob += vb[j] <= yb[j] * M, "cons4_%s" % j
+                #else:
                     # These constraints ensure that when yf=0 and yb=0 ,
                     # no flux goes through the reaction
-                    lp_prob += vf[j] >= yf[j] * 0.5, "cons1_%s" % j
-                    lp_prob += vf[j] <= yf[j] * M, "cons2_%s" % j
-                    lp_prob += vb[j] >= yb[j] * 0.5, "cons3_%s" % j
-                    lp_prob += vb[j] <= yb[j] * M, "cons4_%s" % j
+                lp_prob += vf[j] >= yf[j] * 0.5, "cons1_%s" % j
+                lp_prob += vf[j] <= yf[j] * M, "cons2_%s" % j
+                lp_prob += vb[j] >= yb[j] * 0.5, "cons3_%s" % j
+                lp_prob += vb[j] <= yb[j] * M, "cons4_%s" % j
                 
         if self.add_loopless_constraints:
             self.logger.info("Loopless constraints are turned on.")
@@ -399,7 +399,7 @@ class OptStoic(object):
     def solve(
             self,
             exclude_existing_solution=True,
-            outputfile="OptStoic_pulp_result.txt",
+            outputfile=None,
             max_iteration=None):
         """
         Solve OptStoic problem using pulp.solvers interface
@@ -456,6 +456,9 @@ class OptStoic(object):
         # else:
         #     result_output = open(os.path.join(self.result_filepath, outputfile), "a+")
         
+        #enzyme_loads dict as an output
+        enzyme_loads = {}
+        
         while True and self.iteration <= max_iteration:
             self.logger.info("Iteration %s", self.iteration)
             # lp_prob.wr("OptStoic.lp", mip=1)  # optional
@@ -479,16 +482,17 @@ class OptStoic(object):
                 res['modelstat'] = "Optimal"
                 res['EnzymeLoad'] = []
                 
-                #enzyme_loads dictas an output
-                enzyme_loads = {}
-                
+                # save enzyme loads for each iteration
+                elm_actual_iteration = {}
                 for j in self.database.reactions:
                     if v[j].varValue is not None:
                         if v[j].varValue > EPS or v[j].varValue < -EPS:
                             res['reaction_id'].append(j)
                             res['flux'].append(v[j].varValue)
                         if self.objective == 'EnzymeLoad':
-                            enzyme_loads['E_' + j] = E[j].varValue
+                            elm_actual_iteration['E_' + j] = E[j].varValue
+                enzyme_loads['iteration_' + str(self.iteration)] = elm_actual_iteration
+                    
          
                 #             result_output.write("%s %.8f\n" %(v[j].name, v[j].varValue))
 
@@ -507,14 +511,18 @@ class OptStoic(object):
                     endSubstrateID='C00022',
                     note=res
                 )
-
-                self.write_pathways_to_json(json_filename="temp_pathways.json")
+                if outputfile == None:
+                    outputfile = "OptStoic_pulp_result.txt"
+                self.write_pathways_to_json(json_filename=outputfile)
 
                 # Integer cut constraint is added so that
                 # the same solution cannot be returned again
                 condition = pulp.lpSum([(1 - yf[j] - yb[j])
                                         for j in integer_cut_reactions]) >= 1
                 lp_prob += condition, "IntegerCut_%d" % self.iteration
+                #print([(1 - yf[j] - yb[j]) for j in integer_cut_reactions])
+                #print(integer_cut_reactions)
+                #print(condition)
                 self.iteration += 1
 
             # If a new optimal solution cannot be found, end the program
@@ -631,9 +639,12 @@ class OptStoic(object):
 
             for ind, pathway in self.pathways.items():
                 rxnlist = list(set(pathway.reaction_ids_no_exchange))
-                condition = pulp.lpSum(
-                    [(1 - yf[j] - yb[j]) for j in rxnlist]) >= 1
+                sums = [(1 - yf[j] - yb[j]) for j in rxnlist]
+                condition = pulp.lpSum(sums) >= 1
                 lp_prob += condition, "IntegerCut_%d" % ind
+                print(rxnlist)
+                print(sums)
+                print(condition)
 
         # Solve problem
         self.logger.info("Solving problem...")
