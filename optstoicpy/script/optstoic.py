@@ -189,7 +189,7 @@ class OptStoic(object):
             Eb = pulp.LpVariable.dicts("Eb", self.database.reactions,
                                       lowBound=0, upBound=1e+10, cat='Continuous')
             E = pulp.LpVariable.dicts("E", self.database.reactions,
-                                      lowBound=0, upBound=1e10, cat='Continuous')
+                                      lowBound=-1e10, upBound=1e10, cat='Continuous')
             v = pulp.LpVariable.dicts("v", self.database.reactions,
                                   lowBound=-M, upBound=M, cat=self._varCat)
             vf = pulp.LpVariable.dicts("vf", self.database.reactions,
@@ -251,7 +251,6 @@ class OptStoic(object):
 
         # Fix stoichiometry of source/sink metabolites
         for rxn, bounds in self.specific_bounds.items():
-            # print(v[rxn])
             v[rxn].lowBound = bounds['LB']
             v[rxn].upBound = bounds['UB']
 
@@ -344,16 +343,12 @@ class OptStoic(object):
                 # values (sa_plus or sa_minus)
                 if (j in sa_plus_db.index) and (sa_plus_db.at[j,'sa_plus'] != 0):
                     lp_prob += vf[j] <= Ef[j]*60*sa_plus_db.at[j,'sa_plus'], "sa_plus_cons_%s" % j
-                    #lp_prob += Ef[j] <= yf[j] * M#Ef[j].upBound
-                    if (j in sa_plus_db.index) and (sa_plus_db.at[j,'sa_plus'] != 0):
-                        lp_prob += vb[j] <= Eb[j]*60*sa_plus_db.at[j,'sa_plus'], "sa_minus_cons_%s" % j
-                        #lp_prob += Ef[j] <= yf[j] * M #Ef[j].upBound
-                  #  else:
-                  #      lp_prob += vb[j] >= yb[j] * 0.5, "cons3_%s" % j
-                  #      lp_prob += vb[j] <= yb[j] * M, "cons4_%s" % j
-                #else:
-                    # These constraints ensure that when yf=0 and yb=0 ,
-                    # no flux goes through the reaction
+                    lp_prob += Ef[j] <= yf[j] * Ef[j].upBound
+                    if (j in sa_minus_db.index) and (sa_minus_db.at[j,'sa_minus'] != 0):
+                        lp_prob += vb[j] <= Eb[j]*60*sa_minus_db.at[j,'sa_minus'], "sa_minus_cons_%s" % j
+                        lp_prob += Eb[j] <= yb[j] * Eb[j].upBound
+                # These constraints ensure that when yf=0 and yb=0 ,
+                # no flux goes through the reaction
                 lp_prob += vf[j] >= yf[j] * 0.5, "cons1_%s" % j
                 lp_prob += vf[j] <= yf[j] * M, "cons2_%s" % j
                 lp_prob += vb[j] >= yb[j] * 0.5, "cons3_%s" % j

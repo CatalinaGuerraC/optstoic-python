@@ -13,7 +13,7 @@ SCIP_CMD_PARAMETERS = [
 
 GUROBI_CMD_OPTIONS = [
     ('Threads', 2),
-    ('TimeLimit', 3600),
+    ('TimeLimit', 7200),
     ('MIPGapAbs', 1e-3),
     ('MIPGap', 1e-3),
     ('CliqueCuts', 2),
